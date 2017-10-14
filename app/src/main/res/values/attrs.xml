@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="GoodJobView">
+        <attr name="good_num" format="integer" />
+    </declare-styleable>
+    <declare-styleable name="GoodJobView2">
+        <attr name="good_num2" format="integer" />
+    </declare-styleable>
+</resources>

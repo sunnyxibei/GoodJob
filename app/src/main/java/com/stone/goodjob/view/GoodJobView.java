@@ -1,9 +1,10 @@
-package com.stone.goodjob;
+package com.stone.goodjob.view;
 
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.content.res.Resources;
+import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -16,31 +17,36 @@ import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 
+import com.stone.goodjob.R;
+
 /**
+ * 透明度版本
  * Created by jiayuanbin on 2017/10/13.
  */
 
 public class GoodJobView extends View {
 
-    private Paint paint;
-    private Bitmap unselected;
-    private Bitmap selected;
-    private Bitmap shining;
+    private int goodNum;
+    private int textMoveHeight;//文字上下移动的距离的上限
+    private int duration = 200;
 
-    private int goodNum = 4529;
-    private Rect textBounds;
-
-    private boolean isSelected;
+    private float textDy;//文字上下移动的动态值
     private float shiningAlpha;
     private float shiningScale;
     private float handScale = 1.0f;
+    private float textAlpha;
+    private float[] widths;
+
+    private boolean isSelected;
+
+    private Bitmap unselected;
+    private Bitmap selected;
+    private Bitmap shining;
+    private Rect textBounds;
+
+    private Paint bitmapPaint;
     private Paint textPaint;
     private Paint oldTextPaint;
-    private float textInAlpha;
-    private float textOutAlpha;
-    private float dy;
-    private int textHeight;
-    private int duration = 200;
 
     public GoodJobView(Context context) {
         this(context, null);
@@ -52,20 +58,58 @@ public class GoodJobView extends View {
 
     public GoodJobView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
+
+        TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.GoodJobView);
+        goodNum = a.getInt(R.styleable.GoodJobView_good_num, 2022);
+        a.recycle();
+
+        textBounds = new Rect();
+        widths = new float[6];//默认支持到6位数
+
+        bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        oldTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        //初始化文字相关配置
+        textPaint.setColor(Color.GRAY);
+        textPaint.setTextSize(spToPx(14));
+        oldTextPaint.setColor(Color.GRAY);
+        oldTextPaint.setTextSize(spToPx(14));
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
         Resources resources = getResources();
         unselected = BitmapFactory.decodeResource(resources, R.mipmap.ic_messages_like_unselected);
         selected = BitmapFactory.decodeResource(resources, R.mipmap.ic_messages_like_selected);
         shining = BitmapFactory.decodeResource(resources, R.mipmap.ic_messages_like_selected_shining);
-
-        paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        oldTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        textBounds = new Rect();
     }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        unselected.recycle();
+        selected.recycle();
+        shining.recycle();
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        //高度默认限定为bitmap的高度加上上下margin各10dp
+        heightMeasureSpec = MeasureSpec.makeMeasureSpec(selected.getHeight() + dpToPx(20), MeasureSpec.EXACTLY);
+        //宽度默认为bitmap的宽度加上左右margin各10dp，文字的宽度和文字右侧10dp
+        String s = String.valueOf(goodNum);
+        float textWidth = textPaint.measureText(s, 0, s.length());
+        widthMeasureSpec = MeasureSpec.makeMeasureSpec((int) (selected.getWidth() + textWidth + dpToPx(30)), MeasureSpec.EXACTLY);
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+    }
+
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+
         int width = getWidth();
         int height = getHeight();
         int centerY = height / 2;
@@ -77,25 +121,19 @@ public class GoodJobView extends View {
         int handTop = (height - handBitmapHeight) / 2;
         canvas.save();
         canvas.scale(handScale, handScale, handBitmapWidth / 2, centerY);
-        canvas.drawBitmap(handBitmap, 0, handTop, paint);
+        canvas.drawBitmap(handBitmap, 0, handTop, bitmapPaint);
         canvas.restore();
 
         //画shining
-        int shiningTop = handTop - shining.getHeight() + dpToPx(6);//手动矫正一下位置
-        paint.setAlpha((int) (255 * shiningAlpha));
+        int shiningTop = handTop - shining.getHeight() + dpToPx(6);//手动加上6dp的margin
+        bitmapPaint.setAlpha((int) (255 * shiningAlpha));
         canvas.save();
         canvas.scale(shiningScale, shiningScale, handBitmapWidth / 2, handTop);
-        canvas.drawBitmap(shining, 0, shiningTop, paint);
+        canvas.drawBitmap(shining, 0, shiningTop, bitmapPaint);
         canvas.restore();
-        //恢复paint透明度
-        paint.setAlpha(255);
+        //恢复bitmapPaint透明度
+        bitmapPaint.setAlpha(255);
 
-        textPaint.setColor(Color.GRAY);
-        textPaint.setTextSize(spToPx(14));
-        oldTextPaint.setColor(Color.GRAY);
-        oldTextPaint.setTextSize(spToPx(14));
-
-        int textX = handBitmapWidth + dpToPx(10);
         String value = String.valueOf(goodNum);
         String oldValue;
         if (isSelected) {
@@ -103,49 +141,38 @@ public class GoodJobView extends View {
         } else {
             oldValue = String.valueOf(goodNum + 1);
         }
-
         int length = value.length();
+        //获取文字绘制的坐标
         textPaint.getTextBounds(value, 0, length, textBounds);
-        int minusHeight = (textBounds.top + textBounds.bottom) / 2;
-        //canvas.drawText(value, x, height / 2 - minusHeight, paint);
-        int textY = height / 2 - minusHeight;
-        //要把文字拆解成一个一个的字符
-        //假装oldValue.length = value.length
-        //paint.getRunAdvance(value, 0, length, 0, length, false, length - 1)
-        float textWidth = textPaint.measureText(value, 0, length);
-        textHeight = textBounds.height();
-        float[] widths = new float[length];
+        int textY = height / 2 - (textBounds.top + textBounds.bottom) / 2;
+        int textX = handBitmapWidth + dpToPx(10);//手动加上10dp的margin
+        if (length != oldValue.length() || textMoveHeight == 0) {
+            //直接绘制文字 没找到即刻App里面对这种情况的处理效果
+            canvas.drawText(value, textX, textY, textPaint);
+            return;
+        }
+        //把文字拆解成一个一个的字符
         textPaint.getTextWidths(value, widths);
         char[] chars = value.toCharArray();
         char[] oldChars = oldValue.toCharArray();
-        for (int i = 0; i < widths.length; i++) {
-            textX += widths[i];
-
+        for (int i = 0; i < chars.length; i++) {
             if (oldChars[i] == chars[i]) {
-                //没有动效 直接画当前的chars
+                textPaint.setAlpha(255);
                 canvas.drawText(String.valueOf(chars[i]), textX, textY, textPaint);
             } else {
-                //有动效
                 if (isSelected) {
-                    //原有文字向上
-                    canvas.save();
-                    //现在文字渐显
-                    textPaint.setAlpha((int) (255 * textInAlpha));
-                    //现在文字向上
-
-                    canvas.translate(0, dy);
-                    canvas.drawText(String.valueOf(chars[i]), textX, textY, textPaint);
-
-                    //原有文字渐隐
-                    oldTextPaint.setAlpha((int) (255 * textOutAlpha));
-                    canvas.drawText(String.valueOf(oldChars[i]), textX, textY, oldTextPaint);
-                    canvas.restore();
+                    oldTextPaint.setAlpha((int) (255 * (1 - textAlpha)));
+                    canvas.drawText(String.valueOf(oldChars[i]), textX, textY - textMoveHeight + textDy, oldTextPaint);
+                    textPaint.setAlpha((int) (255 * textAlpha));
+                    canvas.drawText(String.valueOf(chars[i]), textX, textY + textDy, textPaint);
                 } else {
-                    //原有文字向下
-                    canvas.save();
-                    canvas.restore();
+                    oldTextPaint.setAlpha((int) (255 * (1 - textAlpha)));
+                    canvas.drawText(String.valueOf(oldChars[i]), textX, textY + textMoveHeight + textDy, oldTextPaint);
+                    textPaint.setAlpha((int) (255 * textAlpha));
+                    canvas.drawText(String.valueOf(chars[i]), textX, textY + textDy, textPaint);
                 }
             }
+            textX += widths[i];
         }
     }
 
@@ -162,7 +189,6 @@ public class GoodJobView extends View {
     private void toggle() {
         isSelected = !isSelected;
         if (isSelected) {
-            //变为选择状态
             ObjectAnimator handScaleAnim = ObjectAnimator.ofFloat(this, "handScale", 1f, 0.8f, 1f);
             handScaleAnim.setDuration(duration);
 
@@ -177,7 +203,6 @@ public class GoodJobView extends View {
             set.start();
             setGoodNum(++goodNum);
         } else {
-            //变为不选状态
             ObjectAnimator handScaleAnim = ObjectAnimator.ofFloat(this, "handScale", 1f, 0.8f, 1f);
             handScaleAnim.setDuration(duration);
             handScaleAnim.start();
@@ -187,37 +212,35 @@ public class GoodJobView extends View {
         }
     }
 
-    public void setTextInAlpha(float textInAlpha) {
-        this.textInAlpha = textInAlpha;
-        invalidate();
-    }
-
-    public void setTextOutAlpha(float textOutAlpha) {
-        this.textOutAlpha = textOutAlpha;
-        invalidate();
-    }
-
-    public void setDy(float dy) {
-        this.dy = dy;
+    @Keep
+    public void setTextAlpha(float textAlpha) {
+        this.textAlpha = textAlpha;
         invalidate();
     }
 
     @Keep
-    public void setGoodNum(int goodNum) {
-        this.goodNum = goodNum;
+    public void setTextDy(float textDy) {
+        this.textDy = textDy;
+        invalidate();
+    }
 
-        ObjectAnimator textOutAlphaAnim = ObjectAnimator.ofFloat(this, "textOutAlpha", 1f, 0f);
-        textOutAlphaAnim.setDuration(duration);
-        ObjectAnimator textInAlphaAnim = ObjectAnimator.ofFloat(this, "textInAlpha", 0f, 1f);
+    public void setGoodNum(int goodNum) {
+        float startY;
+        textMoveHeight = dpToPx(20);
+        if (isSelected) {
+            startY = textMoveHeight;
+        } else {
+            startY = -textMoveHeight;
+        }
+
+        ObjectAnimator textInAlphaAnim = ObjectAnimator.ofFloat(this, "textAlpha", 0f, 1f);
         textInAlphaAnim.setDuration(duration);
-        ObjectAnimator dyAnim = ObjectAnimator.ofFloat(this, "dy", -textHeight, 0);
+        ObjectAnimator dyAnim = ObjectAnimator.ofFloat(this, "textDy", startY, 0);
         dyAnim.setDuration(duration);
 
         AnimatorSet set = new AnimatorSet();
-        set.playTogether(textOutAlphaAnim, textInAlphaAnim, dyAnim);
+        set.playTogether(textInAlphaAnim, dyAnim);
         set.start();
-
-        invalidate();
     }
 
     @Keep
